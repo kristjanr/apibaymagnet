@@ -94,6 +94,41 @@
         }
         .copy-btn:hover { background-color: #047857; }
         .copy-btn.copied { background-color: #4b5563; cursor: default; }
+        #debug-panel {
+            margin-top: 32px;
+            border: 1px solid #374151;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        #debug-header {
+            background: #1f2937;
+            padding: 8px 14px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+            user-select: none;
+        }
+        #debug-header span { font-size: 13px; color: #9ca3af; font-family: monospace; }
+        #debug-clear { font-size: 12px; color: #6b7280; background: none; border: none; cursor: pointer; padding: 2px 8px; }
+        #debug-clear:hover { color: #f87171; }
+        #debug-log {
+            background: #0d1117;
+            padding: 10px 14px;
+            max-height: 320px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+            line-height: 1.6;
+        }
+        .dlog { color: #9ca3af; }
+        .dlog.error { color: #f87171; }
+        .dlog.warn  { color: #fbbf24; }
+        .dlog.info  { color: #60a5fa; }
+        .dlog.req   { color: #a78bfa; }
+        .dlog.res   { color: #34d399; }
+        .dlog.res.fail { color: #f87171; }
+        .dlog .ts   { color: #4b5563; margin-right: 6px; }
     </style>
 </head>
 <body>
@@ -108,7 +143,68 @@
     <div id="status-msg" class="status"></div>
     <div id="results-list"></div>
 
+    <div id="debug-panel">
+        <div id="debug-header" onclick="toggleDebug()">
+            <span>&#9654; Debug log</span>
+            <button id="debug-clear" onclick="event.stopPropagation(); clearDebug()">clear</button>
+        </div>
+        <div id="debug-log"></div>
+    </div>
+
     <script>
+        // --- Debug panel ---
+        const debugLog = document.getElementById("debug-log");
+        let debugOpen = true;
+
+        function toggleDebug() {
+            debugOpen = !debugOpen;
+            debugLog.style.display = debugOpen ? "block" : "none";
+            document.querySelector("#debug-header span").textContent =
+                (debugOpen ? "▼" : "►") + " Debug log";
+        }
+        function clearDebug() { debugLog.innerHTML = ""; }
+
+        function dlog(msg, type) {
+            const ts = new Date().toTimeString().slice(0,8);
+            const el = document.createElement("div");
+            el.className = "dlog " + (type || "");
+            el.innerHTML = '<span class="ts">' + ts + '</span>' + escHtml(String(msg));
+            debugLog.appendChild(el);
+            debugLog.scrollTop = debugLog.scrollHeight;
+        }
+
+        // Intercept console
+        ["log","info","warn","error"].forEach(level => {
+            const orig = console[level].bind(console);
+            console[level] = function(...args) {
+                orig(...args);
+                dlog("[" + level + "] " + args.map(a => {
+                    try { return typeof a === "object" ? JSON.stringify(a) : String(a); }
+                    catch(e) { return String(a); }
+                }).join(" "), level);
+            };
+        });
+
+        window.addEventListener("error", e => dlog("[uncaught] " + e.message + " @ " + e.filename + ":" + e.lineno, "error"));
+        window.addEventListener("unhandledrejection", e => dlog("[promise] " + e.reason, "error"));
+
+        async function debugFetch(url) {
+            dlog("[req] GET " + url, "req");
+            const t0 = Date.now();
+            try {
+                const res = await fetch(url);
+                const ms  = Date.now() - t0;
+                const ok  = res.ok;
+                dlog("[res] " + res.status + " " + res.statusText + " (" + ms + "ms) " + url, "res" + (ok ? "" : " fail"));
+                return res;
+            } catch(err) {
+                const ms = Date.now() - t0;
+                dlog("[res] FAILED (" + ms + "ms) " + err.message, "res fail");
+                throw err;
+            }
+        }
+        // --- End debug panel ---
+
         const TRACKERS = [
             "udp://tracker.opentrackr.org:1337",
             "udp://open.stealth.si:80/announce",
@@ -143,7 +239,7 @@
             try {
                 const q      = encodeURIComponent(query).replace(/%20/g, "+");
                 const apiUrl = "https://apibay.org/q.php?q=" + q;
-                const res = await fetch("https://corsproxy.io/?url=" + encodeURIComponent(apiUrl));
+                const res = await debugFetch("https://corsproxy.io/?url=" + encodeURIComponent(apiUrl));
                 if (!res.ok) throw new Error("HTTP " + res.status);
                 const data = await res.json();
 
