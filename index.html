@@ -351,7 +351,7 @@
             try {
                 const q      = encodeURIComponent(query).replace(/%20/g, "+");
                 const apiUrl = "https://apibay.org/q.php?q=" + q;
-                const res = await debugFetch("https://corsproxy.io/?url=" + encodeURIComponent(apiUrl));
+                const res = await debugFetch("https://corsproxy.io/?key=77d6db27&url=" + encodeURIComponent(apiUrl));
                 if (!res.ok) throw new Error("HTTP " + res.status);
                 const data = await res.json();
                 renderResults(data);
