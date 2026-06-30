@@ -141,8 +141,9 @@
             list.innerHTML  = "";
 
             try {
-                const q   = encodeURIComponent(query).replace(/%20/g, "+");
-                const res = await fetch("https://apibay.org/q.php?q=" + q);
+                const q      = encodeURIComponent(query).replace(/%20/g, "+");
+                const apiUrl = "https://apibay.org/q.php?q=" + q;
+                const res = await fetch("https://corsproxy.io/?url=" + encodeURIComponent(apiUrl));
                 if (!res.ok) throw new Error("HTTP " + res.status);
                 const data = await res.json();
 
