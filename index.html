@@ -130,6 +130,26 @@
         .dlog.res   { color: #34d399; }
         .dlog.res.fail { color: #f87171; }
         .dlog .ts   { color: #4b5563; margin-right: 6px; }
+        #paste-section { margin-bottom: 20px; }
+        #paste-section summary { cursor: pointer; color: #9ca3af; font-size: 14px; padding: 4px 0; user-select: none; }
+        #paste-section summary:hover { color: #d1d5db; }
+        .paste-hint { font-size: 13px; color: #6b7280; margin: 10px 0; line-height: 1.5; }
+        .paste-hint code { background: #1e1e1e; padding: 2px 6px; border-radius: 4px; color: #9ca3af; word-break: break-all; }
+        #json-input {
+            width: 100%;
+            min-height: 120px;
+            padding: 12px 16px;
+            border: 1px solid #333;
+            border-radius: 6px;
+            background-color: #1e1e1e;
+            color: #fff;
+            font-family: monospace;
+            font-size: 13px;
+            resize: vertical;
+            margin-bottom: 10px;
+            outline: none;
+        }
+        #json-input:focus { border-color: #2563eb; }
     </style>
 </head>
 <body>
@@ -140,6 +160,15 @@
                onkeydown="if(event.key==='Enter') performSearch()">
         <button class="search-btn" onclick="performSearch()">Search</button>
     </div>
+
+    <details id="paste-section">
+        <summary>Or paste apibay JSON manually (no proxy needed)</summary>
+        <p class="paste-hint">Open
+            <code>https://apibay.org/q.php?q=YOUR+SEARCH</code>
+            in a browser tab, copy the whole JSON array, paste it below, then press Render.</p>
+        <textarea id="json-input" placeholder='[{"id":"...","name":"...","info_hash":"...","seeders":"...","leechers":"...","size":"..."}]'></textarea>
+        <button class="search-btn" onclick="renderFromJson()">Render from JSON</button>
+    </details>
 
     <div id="status-msg" class="status"></div>
     <div id="results-list"></div>
@@ -228,6 +257,82 @@
             return (n / Math.pow(1024, i)).toFixed(2) + " " + units[i];
         }
 
+        // Render an apibay result array (used by both live search and manual JSON paste)
+        function renderResults(data) {
+            const list = document.getElementById("results-list");
+            const msg  = document.getElementById("status-msg");
+            list.innerHTML = "";
+
+            if (!Array.isArray(data)) {
+                console.error("Expected a JSON array, got:", data);
+                msg.textContent = "Error: data is not a JSON array (see debug log).";
+                return;
+            }
+
+            if (!data.length || data[0].id === "0") {
+                msg.textContent = "No results found.";
+                return;
+            }
+
+            msg.textContent = "Found " + data.length + " result(s).";
+
+            data.forEach(item => {
+                if (item.id === "0") return;
+                const magnet = "magnet:?xt=urn:btih:" + item.info_hash +
+                               "&dn=" + encodeURIComponent(item.name) + TRACKERS;
+
+                const row = document.createElement("div");
+                row.className = "result-item";
+                row.innerHTML =
+                    '<div class="result-info">' +
+                        '<div class="result-name">' + escHtml(item.name) + '</div>' +
+                        '<div class="result-meta">' +
+                            '<span class="seeders">▲ ' + escHtml(item.seeders) + '</span>' +
+                            '<span class="leechers">▼ ' + escHtml(item.leechers) + '</span>' +
+                            '<span>Size: ' + escHtml(formatSize(item.size)) + '</span>' +
+                        '</div>' +
+                    '</div>' +
+                    '<button class="copy-btn" data-magnet="">Copy Magnet</button>';
+
+                const btn = row.querySelector(".copy-btn");
+                btn.dataset.magnet = magnet;
+                btn.addEventListener("click", function () {
+                    navigator.clipboard.writeText(this.dataset.magnet).then(() => {
+                        this.textContent = "Copied!";
+                        this.classList.add("copied");
+                        this.disabled = true;
+                        setTimeout(() => {
+                            this.textContent = "Copy Magnet";
+                            this.classList.remove("copied");
+                            this.disabled = false;
+                        }, 2500);
+                    }).catch(() => {
+                        alert("Copy failed. Please copy manually:\n\n" + this.dataset.magnet);
+                    });
+                });
+
+                list.appendChild(row);
+            });
+        }
+
+        // Manually render from a pasted apibay JSON array (no network / proxy needed)
+        function renderFromJson() {
+            const raw = document.getElementById("json-input").value.trim();
+            const msg = document.getElementById("status-msg");
+            if (!raw) return;
+
+            let data;
+            try {
+                data = JSON.parse(raw);
+            } catch (e) {
+                console.error("JSON parse failed:", e.message);
+                document.getElementById("results-list").innerHTML = "";
+                msg.textContent = "Invalid JSON: " + e.message;
+                return;
+            }
+            renderResults(data);
+        }
+
         let searching = false;
 
         async function performSearch() {
@@ -249,56 +354,7 @@
                 const res = await debugFetch("https://corsproxy.io/?url=" + encodeURIComponent(apiUrl));
                 if (!res.ok) throw new Error("HTTP " + res.status);
                 const data = await res.json();
-
-                if (!Array.isArray(data)) {
-                    console.error("Unexpected response shape:", data);
-                    msg.textContent = "Error: unexpected response from proxy/apibay (see debug log).";
-                    return;
-                }
-
-                if (!data.length || data[0].id === "0") {
-                    msg.textContent = "No results found.";
-                    return;
-                }
-
-                msg.textContent = "Found " + data.length + " result(s).";
-
-                data.forEach(item => {
-                    if (item.id === "0") return;
-                    const magnet = "magnet:?xt=urn:btih:" + item.info_hash +
-                                   "&dn=" + encodeURIComponent(item.name) + TRACKERS;
-
-                    const row = document.createElement("div");
-                    row.className = "result-item";
-                    row.innerHTML =
-                        '<div class="result-info">' +
-                            '<div class="result-name">' + escHtml(item.name) + '</div>' +
-                            '<div class="result-meta">' +
-                                '<span class="seeders">▲ ' + escHtml(item.seeders) + '</span>' +
-                                '<span class="leechers">▼ ' + escHtml(item.leechers) + '</span>' +
-                                '<span>Size: ' + escHtml(formatSize(item.size)) + '</span>' +
-                            '</div>' +
-                        '</div>' +
-                        '<button class="copy-btn" data-magnet="">Copy Magnet</button>';
-
-                    row.querySelector(".copy-btn").dataset.magnet = magnet;
-                    row.querySelector(".copy-btn").addEventListener("click", function () {
-                        navigator.clipboard.writeText(this.dataset.magnet).then(() => {
-                            this.textContent = "Copied!";
-                            this.classList.add("copied");
-                            this.disabled = true;
-                            setTimeout(() => {
-                                this.textContent = "Copy Magnet";
-                                this.classList.remove("copied");
-                                this.disabled = false;
-                            }, 2500);
-                        }).catch(() => {
-                            alert("Copy failed. Please copy manually:\n\n" + this.dataset.magnet);
-                        });
-                    });
-
-                    list.appendChild(row);
-                });
+                renderResults(data);
             } catch (err) {
                 console.error(err);
                 msg.textContent = "Error: could not reach apibay.org. " + err.message;
