@@ -50,6 +50,7 @@
             transition: background-color 0.2s;
         }
         button.search-btn:hover { background-color: #1d4ed8; }
+        button.search-btn:disabled { background-color: #374151; cursor: default; }
         .status {
             text-align: center;
             color: #9ca3af;
@@ -221,7 +222,7 @@
 
         function formatSize(bytes) {
             const n = parseInt(bytes);
-            if (!n) return "0 B";
+            if (!n || n < 0) return "0 B";
             const units = ["B","KB","MB","GB","TB"];
             const i = Math.floor(Math.log(n) / Math.log(1024));
             return (n / Math.pow(1024, i)).toFixed(2) + " " + units[i];
