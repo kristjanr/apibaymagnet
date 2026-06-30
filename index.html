@@ -235,6 +235,9 @@
         }
         // --- End debug panel ---
 
+        // Your Cloudflare Worker proxy (see worker.js). Replace after deploying.
+        const PROXY_BASE = "https://apibay-proxy.YOUR-SUBDOMAIN.workers.dev";
+
         const TRACKERS = [
             "udp://tracker.opentrackr.org:1337",
             "udp://open.stealth.si:80/announce",
@@ -349,9 +352,8 @@
             list.innerHTML  = "";
 
             try {
-                const q      = encodeURIComponent(query).replace(/%20/g, "+");
-                const apiUrl = "https://apibay.org/q.php?q=" + q;
-                const res = await debugFetch("https://corsproxy.io/?key=77d6db27&url=" + encodeURIComponent(apiUrl));
+                const q   = encodeURIComponent(query).replace(/%20/g, "+");
+                const res = await debugFetch(PROXY_BASE + "/?q=" + q);
                 if (!res.ok) throw new Error("HTTP " + res.status);
                 const data = await res.json();
                 renderResults(data);
