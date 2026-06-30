@@ -145,7 +145,7 @@
 
     <div id="debug-panel">
         <div id="debug-header" onclick="toggleDebug()">
-            <span>&#9654; Debug log</span>
+            <span>&#9660; Debug log</span>
             <button id="debug-clear" onclick="event.stopPropagation(); clearDebug()">clear</button>
         </div>
         <div id="debug-log"></div>
@@ -227,12 +227,18 @@
             return (n / Math.pow(1024, i)).toFixed(2) + " " + units[i];
         }
 
+        let searching = false;
+
         async function performSearch() {
+            if (searching) return;          // ignore re-entry while a request is in flight
             const query = document.getElementById("search-input").value.trim();
             const list  = document.getElementById("results-list");
             const msg   = document.getElementById("status-msg");
+            const btn   = document.querySelector(".search-btn");
             if (!query) return;
 
+            searching = true;
+            btn.disabled = true;
             msg.textContent = "Searching…";
             list.innerHTML  = "";
 
@@ -243,7 +249,13 @@
                 if (!res.ok) throw new Error("HTTP " + res.status);
                 const data = await res.json();
 
-                if (!data || !data.length || data[0].id === "0") {
+                if (!Array.isArray(data)) {
+                    console.error("Unexpected response shape:", data);
+                    msg.textContent = "Error: unexpected response from proxy/apibay (see debug log).";
+                    return;
+                }
+
+                if (!data.length || data[0].id === "0") {
                     msg.textContent = "No results found.";
                     return;
                 }
@@ -261,9 +273,9 @@
                         '<div class="result-info">' +
                             '<div class="result-name">' + escHtml(item.name) + '</div>' +
                             '<div class="result-meta">' +
-                                '<span class="seeders">▲ ' + item.seeders + '</span>' +
-                                '<span class="leechers">▼ ' + item.leechers + '</span>' +
-                                '<span>Size: ' + formatSize(item.size) + '</span>' +
+                                '<span class="seeders">▲ ' + escHtml(item.seeders) + '</span>' +
+                                '<span class="leechers">▼ ' + escHtml(item.leechers) + '</span>' +
+                                '<span>Size: ' + escHtml(formatSize(item.size)) + '</span>' +
                             '</div>' +
                         '</div>' +
                         '<button class="copy-btn" data-magnet="">Copy Magnet</button>';
@@ -289,11 +301,14 @@
             } catch (err) {
                 console.error(err);
                 msg.textContent = "Error: could not reach apibay.org. " + err.message;
+            } finally {
+                searching = false;
+                btn.disabled = false;
             }
         }
 
         function escHtml(str) {
-            return str.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+            return String(str).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
         }
     </script>
 </body>
