@@ -150,6 +150,26 @@
             outline: none;
         }
         #json-input:focus { border-color: #2563eb; }
+        #sort-bar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 16px;
+            font-size: 14px;
+            color: #9ca3af;
+        }
+        #sort-select {
+            flex: 1;
+            padding: 8px 12px;
+            border: 1px solid #333;
+            border-radius: 6px;
+            background-color: #1e1e1e;
+            color: #fff;
+            font-size: 14px;
+            outline: none;
+        }
+        #sort-select:focus { border-color: #2563eb; }
+        .ext-tag { color: #a78bfa; text-transform: uppercase; }
     </style>
 </head>
 <body>
@@ -171,6 +191,24 @@
     </details>
 
     <div id="status-msg" class="status"></div>
+
+    <div id="sort-bar" style="display:none">
+        <label for="sort-select">Sort by</label>
+        <select id="sort-select" onchange="applySort()">
+            <option value="seeders-desc">Seeders — most first (default)</option>
+            <option value="seeders-asc">Seeders — fewest first</option>
+            <option value="leechers-desc">Leechers — most first</option>
+            <option value="leechers-asc">Leechers — fewest first</option>
+            <option value="size-desc">Size — largest first</option>
+            <option value="size-asc">Size — smallest first</option>
+            <option value="added-desc">Date — newest first</option>
+            <option value="added-asc">Date — oldest first</option>
+            <option value="name-asc">Name — A to Z</option>
+            <option value="name-desc">Name — Z to A</option>
+            <option value="ext-asc">File extension</option>
+        </select>
+    </div>
+
     <div id="results-list"></div>
 
     <div id="debug-panel">
@@ -235,6 +273,9 @@
         }
         // --- End debug panel ---
 
+        // Your Cloudflare Worker proxy (see worker.js). Replace after deploying.
+        const PROXY_BASE = "https://apibay-proxy.YOUR-SUBDOMAIN.workers.dev";
+
         const TRACKERS = [
             "udp://tracker.opentrackr.org:1337",
             "udp://open.stealth.si:80/announce",
@@ -257,29 +298,80 @@
             return (n / Math.pow(1024, i)).toFixed(2) + " " + units[i];
         }
 
+        // Unix-seconds timestamp -> YYYY-MM-DD (or "" if unavailable)
+        function formatDate(added) {
+            const n = parseInt(added);
+            if (!n) return "";
+            return new Date(n * 1000).toISOString().slice(0, 10);
+        }
+
+        // Best-effort file extension pulled from the release name (or "" if none)
+        function fileExt(name) {
+            const m = String(name).toLowerCase().match(/\.([a-z0-9]{2,4})$/);
+            return m ? m[1] : "";
+        }
+
+        // Sort a copy of the data according to the current dropdown selection
+        function sortData(data) {
+            const mode = document.getElementById("sort-select").value;
+            const num  = v => parseInt(v) || 0;
+            const name = v => String(v == null ? "" : v);
+            const comparators = {
+                "seeders-desc":  (a, b) => num(b.seeders)  - num(a.seeders),
+                "seeders-asc":   (a, b) => num(a.seeders)  - num(b.seeders),
+                "leechers-desc": (a, b) => num(b.leechers) - num(a.leechers),
+                "leechers-asc":  (a, b) => num(a.leechers) - num(b.leechers),
+                "size-desc":     (a, b) => num(b.size)     - num(a.size),
+                "size-asc":      (a, b) => num(a.size)     - num(b.size),
+                "added-desc":    (a, b) => num(b.added)    - num(a.added),
+                "added-asc":     (a, b) => num(a.added)    - num(b.added),
+                "name-asc":      (a, b) => name(a.name).localeCompare(name(b.name)),
+                "name-desc":     (a, b) => name(b.name).localeCompare(name(a.name)),
+                // Group by extension; within a group (and for extension-less items) keep seeders high-to-low
+                "ext-asc":       (a, b) => fileExt(a.name).localeCompare(fileExt(b.name))
+                                           || num(b.seeders) - num(a.seeders),
+            };
+            return data.slice().sort(comparators[mode] || comparators["seeders-desc"]);
+        }
+
+        // Re-render the last result set when the sort selection changes
+        let lastResults = null;
+        function applySort() {
+            if (lastResults) renderResults(lastResults);
+        }
+
         // Render an apibay result array (used by both live search and manual JSON paste)
         function renderResults(data) {
-            const list = document.getElementById("results-list");
-            const msg  = document.getElementById("status-msg");
+            const list    = document.getElementById("results-list");
+            const msg     = document.getElementById("status-msg");
+            const sortBar = document.getElementById("sort-bar");
             list.innerHTML = "";
 
             if (!Array.isArray(data)) {
                 console.error("Expected a JSON array, got:", data);
                 msg.textContent = "Error: data is not a JSON array (see debug log).";
+                lastResults = null;
+                sortBar.style.display = "none";
                 return;
             }
 
             if (!data.length || data[0].id === "0") {
                 msg.textContent = "No results found.";
+                lastResults = null;
+                sortBar.style.display = "none";
                 return;
             }
 
+            lastResults = data;
+            sortBar.style.display = "flex";
             msg.textContent = "Found " + data.length + " result(s).";
 
-            data.forEach(item => {
+            sortData(data).forEach(item => {
                 if (item.id === "0") return;
                 const magnet = "magnet:?xt=urn:btih:" + item.info_hash +
                                "&dn=" + encodeURIComponent(item.name) + TRACKERS;
+                const ext  = fileExt(item.name);
+                const date = formatDate(item.added);
 
                 const row = document.createElement("div");
                 row.className = "result-item";
@@ -290,6 +382,8 @@
                             '<span class="seeders">▲ ' + escHtml(item.seeders) + '</span>' +
                             '<span class="leechers">▼ ' + escHtml(item.leechers) + '</span>' +
                             '<span>Size: ' + escHtml(formatSize(item.size)) + '</span>' +
+                            (date ? '<span>' + escHtml(date) + '</span>' : '') +
+                            (ext  ? '<span class="ext-tag">' + escHtml(ext) + '</span>' : '') +
                         '</div>' +
                     '</div>' +
                     '<button class="copy-btn" data-magnet="">Copy Magnet</button>';
@@ -343,15 +437,20 @@
             const btn   = document.querySelector(".search-btn");
             if (!query) return;
 
+            if (PROXY_BASE.includes("YOUR-SUBDOMAIN")) {
+                msg.textContent = "Live search isn't configured yet — use “Or paste apibay JSON manually” below.";
+                document.getElementById("paste-section").open = true;
+                return;
+            }
+
             searching = true;
             btn.disabled = true;
             msg.textContent = "Searching…";
             list.innerHTML  = "";
 
             try {
-                const q      = encodeURIComponent(query).replace(/%20/g, "+");
-                const apiUrl = "https://apibay.org/q.php?q=" + q;
-                const res = await debugFetch("https://corsproxy.io/?key=77d6db27&url=" + encodeURIComponent(apiUrl));
+                const q   = encodeURIComponent(query).replace(/%20/g, "+");
+                const res = await debugFetch(PROXY_BASE + "/?q=" + q);
                 if (!res.ok) throw new Error("HTTP " + res.status);
                 const data = await res.json();
                 renderResults(data);
