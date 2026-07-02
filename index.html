@@ -437,6 +437,12 @@
             const btn   = document.querySelector(".search-btn");
             if (!query) return;
 
+            if (PROXY_BASE.includes("YOUR-SUBDOMAIN")) {
+                msg.textContent = "Live search isn't configured yet — use “Or paste apibay JSON manually” below.";
+                document.getElementById("paste-section").open = true;
+                return;
+            }
+
             searching = true;
             btn.disabled = true;
             msg.textContent = "Searching…";
