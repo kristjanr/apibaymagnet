@@ -1,16 +1,25 @@
 // Cloudflare Worker — apibay search proxy with CORS headers.
 //
 // Deploy (no install needed):
-//   1. https://dash.cloudflare.com  →  Workers & Pages  →  Create application
-//      →  Create Worker.
-//   2. Give it a name, e.g. "apibay-proxy", and click Deploy.
-//   3. Click "Edit code", replace the sample with this whole file, Deploy again.
-//   4. Your URL is shown at the top, e.g.
-//        https://apibay-proxy.<your-subdomain>.workers.dev
-//      Point the page's PROXY_BASE constant at that URL.
+//   1. https://dash.cloudflare.com  →  Workers & Pages  →  open your worker.
+//   2. Edit code, replace everything with this file, then click Deploy.
 //
 // Usage:  GET https://apibay-proxy.<sub>.workers.dev/?q=rick+morty
 //         -> apibay JSON array, with Access-Control-Allow-Origin: *
+//
+// Reliability notes:
+//   * A browser-like User-Agent avoids apibay throttling bot/default agents.
+//   * Successful responses are cached at the Cloudflare edge (cacheTtlByStatus)
+//     so repeat queries never re-hit apibay.
+//   * 429s are retried a few times with backoff before giving up.
+
+const UPSTREAM_HEADERS = {
+  "User-Agent":
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  "Accept": "application/json, text/plain, */*",
+  "Referer": "https://thepiratebay.org/",
+};
 
 export default {
   async fetch(request) {
@@ -19,7 +28,6 @@ export default {
       "Access-Control-Allow-Methods": "GET, OPTIONS",
     };
 
-    // CORS preflight
     if (request.method === "OPTIONS") {
       return new Response(null, { headers: cors });
     }
@@ -35,24 +43,35 @@ export default {
     const apiUrl =
       "https://apibay.org/q.php?q=" + encodeURIComponent(q).replace(/%20/g, "+");
 
-    try {
-      const upstream = await fetch(apiUrl, {
-        headers: { "User-Agent": "apibay-magnet-search" },
-      });
-      const body = await upstream.text();
-      return new Response(body, {
-        status: upstream.status,
-        headers: {
-          ...cors,
-          "Content-Type": "application/json",
-          "Cache-Control": "public, max-age=60",
-        },
-      });
-    } catch (err) {
-      return new Response(JSON.stringify({ error: String(err) }), {
-        status: 502,
-        headers: { ...cors, "Content-Type": "application/json" },
-      });
+    let status = 502;
+    let body = JSON.stringify({ error: "upstream request failed" });
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt > 0) {
+        await new Promise((r) => setTimeout(r, 400 * attempt)); // 400ms, 800ms backoff
+      }
+      try {
+        const upstream = await fetch(apiUrl, {
+          headers: UPSTREAM_HEADERS,
+          // Cache good responses at the edge; never cache errors.
+          cf: { cacheEverything: true, cacheTtlByStatus: { "200-299": 300, "400-599": 0 } },
+        });
+        status = upstream.status;
+        body = await upstream.text();
+        if (status !== 429) break; // only retry on rate-limit
+      } catch (err) {
+        status = 502;
+        body = JSON.stringify({ error: String(err) });
+      }
     }
+
+    return new Response(body, {
+      status,
+      headers: {
+        ...cors,
+        "Content-Type": "application/json",
+        "Cache-Control": "public, max-age=300",
+      },
+    });
   },
 };
